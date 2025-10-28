@@ -1,7 +1,7 @@
 name = "/packet_buddy:analyze"
 description = "Upload, convert, sanitize, index, and analyze a PCAP in one step."
 args = ["question", "path?=./capture.pcap"]
-script = """
+prompt = """
 SESSION=$(mcp tools call new_session | jq -r .result)
 echo "🆕  Session: $SESSION"
 

@@ -1,6 +1,6 @@
 name = "/packet_buddy:help"
 description = "Show help and examples for using Packet Buddy (PCAP → AI Analysis)."
-script = """
+prompt = """
 echo '
 🦈  Packet Buddy — AI-powered PCAP Analysis
 ===========================================
