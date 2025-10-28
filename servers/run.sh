@@ -6,6 +6,15 @@ SERVERS_DIR="$EXT_DIR/servers"
 VENV="$SERVERS_DIR/packetmcp"
 PYTHON_BIN="${PYTHON_BIN:-python3.11}"
 
+# --- NEW: ensure tshark is installed ---
+if ! command -v tshark >/dev/null 2>&1; then
+  echo "[packet] tshark not found. Installing..." >&2
+  sudo apt update -y >&2
+  sudo apt install -y tshark >&2
+else
+  echo "[packet] tshark found: $(tshark -v | head -n1)" >&2
+fi
+
 # 1) Create venv if missing
 if [ ! -x "$VENV/bin/python3" ]; then
   echo "[packet] creating venv at $VENV" >&2
