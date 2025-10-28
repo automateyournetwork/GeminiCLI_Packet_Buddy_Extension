@@ -1,0 +1,13 @@
+{
+  "name": "Packet_Buddy",
+  "version": "1.0.0",
+  "description": "Chat with packet captures with RAG and MCP",
+  "mcpServers": {
+    "vision": {
+      "command": "bash",
+      "args": ["${extensionPath}${/}servers${/}run.sh"]
+    }
+  },
+  "contextFileName": "GEMINI.md",
+  "excludeTools": []
+}

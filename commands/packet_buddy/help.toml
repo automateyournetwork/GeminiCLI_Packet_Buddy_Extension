@@ -1,0 +1,35 @@
+name = "/packet_buddy:help"
+description = "Show help and examples for using Packet Buddy (PCAP → AI Analysis)."
+script = """
+echo '
+🦈  Packet Buddy — AI-powered PCAP Analysis
+===========================================
+
+Quickly analyze packet captures end-to-end using GPT-4o and the Packet Copilot MCP.
+
+Usage:
+  /packet_buddy:analyze "Can you give me a L2–L4 summary of capture.pcap?"
+
+This single command will:
+  1. Start a new MCP session
+  2. Upload your local PCAP
+  3. Convert it to JSON with tshark
+  4. Sanitize payloads (remove heavy / PII fields)
+  5. Build embeddings & index the data
+  6. Ask GPT-4o your analysis question
+
+Example Prompts:
+  • "Summarize the main protocols and ports."
+  • "Identify the top talkers and flows."
+  • "Are there any retransmissions or drops?"
+  • "Show me HTTP, DNS, or ICMP activity."
+
+Requirements:
+  • OPENAI_API_KEY set
+  • tshark installed and in PATH
+  • packetcopilot_fastmcp_server.py running (stdio or HTTP)
+
+Safety:
+  No external uploads, all work stays local.
+'
+"""
