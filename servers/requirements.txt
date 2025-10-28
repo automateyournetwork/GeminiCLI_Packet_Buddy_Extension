@@ -9,3 +9,4 @@ huggingface-hub
 tiktoken
 sentence-transformers
 python-dotenv
+jq
