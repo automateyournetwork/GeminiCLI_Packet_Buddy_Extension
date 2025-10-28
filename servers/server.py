@@ -203,8 +203,7 @@ def _build_docs_from_json(json_path: str):
         text_content=False
     )
     pages = loader.load_and_split()
-    embeddings = HuggingFaceEmbeddings(model_name='all-MiniLM-L6-v2', model_kwargs={"device": "cpu"})
-    splitter = SemanticChunker(embeddings)
+    splitter = SemanticChunker(chunk_size=1500, chunk_overlap=100)  # ✅ no embeddings here
     docs = splitter.split_documents(pages)
     return docs, pages
 
