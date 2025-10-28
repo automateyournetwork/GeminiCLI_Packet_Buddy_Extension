@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Chat with packet captures with RAG and MCP",
   "mcpServers": {
-    "vision": {
+    "packetBuddy": {
       "command": "bash",
       "args": ["${extensionPath}${/}servers${/}run.sh"]
     }

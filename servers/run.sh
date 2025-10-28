@@ -3,12 +3,12 @@ set -euo pipefail
 
 EXT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
 SERVERS_DIR="$EXT_DIR/servers"
-VENV="$SERVERS_DIR/visionmcp"
+VENV="$SERVERS_DIR/packetmcp"
 PYTHON_BIN="${PYTHON_BIN:-python3.11}"
 
 # 1) Create venv if missing
 if [ ! -x "$VENV/bin/python3" ]; then
-  echo "[vision] creating venv at $VENV" >&2
+  echo "[packet] creating venv at $VENV" >&2
   "$PYTHON_BIN" -m venv "$VENV" 1>&2
   "$VENV/bin/pip" install -U pip wheel setuptools --disable-pip-version-check -q 1>&2
 fi
