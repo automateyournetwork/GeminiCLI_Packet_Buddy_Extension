@@ -1,8 +1,11 @@
 fastmcp
-langchain_google_genai
-langchain_community
 langchain
 langchain-community
+langchain-google-genai
+langchain-text-splitters
+langchain-classic
 chromadb
 huggingface-hub
 tiktoken
+sentence-transformers
+python-dotenv
