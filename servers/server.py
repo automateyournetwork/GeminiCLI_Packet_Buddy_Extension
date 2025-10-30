@@ -160,7 +160,6 @@ PACKET_WHISPERER = """
         Your goal is to provide a clear, concise, and accurate analysis of the packet capture data, leveraging the protocol hints and packet details.
 """
 load_dotenv()
-assert os.getenv("OPENAI_API_KEY"), "OPENAI_API_KEY is required for Gemini."
 
 mcp = FastMCP("PacketCopilot")
 
