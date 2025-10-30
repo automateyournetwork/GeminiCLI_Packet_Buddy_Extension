@@ -9,10 +9,4 @@ gemini extensions install https://github.com/automateyournetwork/GeminiCLI_Packe
 
 ```
 
-```bash
-
-export GOOGLE_API_KEY=
-
-```
-
 ## Enjoy! 
