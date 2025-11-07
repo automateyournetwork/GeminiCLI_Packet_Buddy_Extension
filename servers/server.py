@@ -70,12 +70,8 @@ def upload_and_index(session_id: str) -> str:
     if not json_path or not os.path.exists(json_path):
         raise ValueError("No JSON found. Run convert_to_json first.")
 
-    # --- Create the File Search Store with no args to see what happens ---
-    try:
-        store_obj = client.file_search_stores.create()
-    except TypeError as e:
-        # If it fails, try to get helpful error message about what it expects
-        raise TypeError(f"create() signature issue: {e}. Try checking client.file_search_stores.create.__doc__ or __signature__")
+    # --- Create the File Search Store ---
+    store_obj = client.file_search_stores.create()
     
     # Extract the store name
     if hasattr(store_obj, 'name'):
@@ -86,14 +82,13 @@ def upload_and_index(session_id: str) -> str:
         raise TypeError(f"Cannot extract name. Type: {type(store_obj)}, Content: {store_obj}")
 
     # --- Upload to File Search Store ---
+    # The parameters should be at the top level, not nested in 'config'
     with open(json_path, 'rb') as f:
         op = client.file_search_stores.upload_to_file_search_store(
             file_search_store_name=store_name,
             file=f,
-            config={
-                "display_name": os.path.basename(json_path),
-                "mime_type": "application/json"
-            }
+            display_name=os.path.basename(json_path),  # Direct parameter
+            mime_type="application/json"  # Direct parameter, proper format
         )
 
     # --- Poll until indexing is complete ---
