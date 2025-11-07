@@ -71,36 +71,37 @@ def convert_to_json(session_id: str, filename: str = "", data_b64: str = "") -> 
 # ──────────────────────────────────────────────
 @mcp.tool
 def upload_and_index(session_id: str) -> str:
-    """Upload JSON to Gemini File Search deterministically (SDK v1.47-safe)."""
+    """Upload JSON to Gemini File Search deterministically (handles all SDK return types)."""
     s = _session(session_id)
     json_path = s.get("json_path")
     if not json_path or not os.path.exists(json_path):
         raise ValueError("No JSON found. Run convert_to_json first.")
 
-    # ── 1️⃣ Create File Search Store ───────────────────────────────────────
+    # ── 1️⃣  Create File Search Store ───────────────────────────────────────
     store_obj = client.file_search_stores.create(
         config={"display_name": f"pcap_store_{session_id}"}
     )
 
-    # Normalize immediately, *before* touching `.name`
+    # Defensive normalization: accept str, dict, or object
     if isinstance(store_obj, str):
         store_name = store_obj
-    elif isinstance(store_obj, dict) and "name" in store_obj:
-        store_name = store_obj["name"]
+    elif isinstance(store_obj, dict):
+        store_name = store_obj.get("name") or str(store_obj)
     elif hasattr(store_obj, "name"):
-        store_name = store_obj.name
+        store_name = getattr(store_obj, "name")
     else:
-        raise TypeError(f"Unexpected FileSearchStore response: {store_obj!r}")
+        store_name = str(store_obj)
 
-    print(f"🪣 Created FileSearchStore: {store_name}")
+    print(f"🪣 Using FileSearchStore name: {store_name}")
 
-    # ── 2️⃣ Upload file ────────────────────────────────────────────────────
+    # ── 2️⃣  Upload file ────────────────────────────────────────────────────
+    # Make absolutely sure we pass a string path and not an open file handle.
     op = client.file_search_stores.upload_to_file_search_store(
-        file_search_store_name=store_name,
-        file=json_path,
+        file_search_store_name=str(store_name),
+        file=str(json_path),
         config={
             "display_name": os.path.basename(json_path),
-            "mime_type": "text/plain",  # ✅ correct MIME
+            "mime_type": "text/plain",
             "chunking_config": {
                 "white_space_config": {
                     "max_tokens_per_chunk": 500,
@@ -110,18 +111,22 @@ def upload_and_index(session_id: str) -> str:
         },
     )
 
-    # ── 3️⃣ Poll until indexing completes ─────────────────────────────────
-    op_name = getattr(op, "name", op if isinstance(op, str) else str(op))
+    # ── 3️⃣  Poll until indexing completes ─────────────────────────────────
+    op_name = getattr(op, "name", str(op))
     for _ in range(60):
-        current = client.operations.get(op_name)
-        if getattr(current, "done", False) or (
-            isinstance(current, dict) and current.get("done")
-        ):
-            break
+        try:
+            current = client.operations.get(op_name)
+            if getattr(current, "done", False) or (
+                isinstance(current, dict) and current.get("done")
+            ):
+                break
+        except Exception as e:
+            print(f"⚠️  Polling error: {e}")
         time.sleep(2)
 
     s["store_name"] = store_name
     return f"✅ Uploaded and indexed {json_path} to Gemini File Search store: {store_name}"
+
 
 # ──────────────────────────────────────────────
 # 3️⃣ Analyze → Gemini 2.5 Flash
