@@ -24,18 +24,19 @@ def _session(session_id: str):
 @mcp.tool
 def convert_to_json(session_id: str, filename: str, data_b64: str) -> str:
     """
-    Decode base64 PCAP, run tshark to JSON, store it properly.
+    Decode base64 PCAP, run tshark to JSON (stdout capture, no shell redirection).
     """
-    import subprocess, json, base64, os
+    import base64, os, subprocess, time
+
     s = _session(session_id)
     pcap_path = os.path.join(s["dir"], filename)
     json_path = pcap_path + ".json"
 
-    # Decode and save the PCAP file
+    # 1️⃣ Write the uploaded pcap file
     with open(pcap_path, "wb") as f:
         f.write(base64.b64decode(data_b64))
 
-    # ✅ Use stdout capture instead of shell redirection
+    # 2️⃣ Run tshark safely (capture stdout/stderr)
     result = subprocess.run(
         ["tshark", "-nlr", pcap_path, "-T", "json"],
         capture_output=True,
@@ -43,14 +44,21 @@ def convert_to_json(session_id: str, filename: str, data_b64: str) -> str:
     )
 
     if result.returncode != 0:
-        raise RuntimeError(f"tshark failed: {result.stderr}")
+        errpath = json_path + ".err"
+        with open(errpath, "w") as ef:
+            ef.write(result.stderr or "<no stderr>")
+        raise RuntimeError(
+            f"tshark failed with exit {result.returncode}. See {errpath}\n{result.stderr}"
+        )
 
-    # Write the JSON output directly
-    with open(json_path, "w") as f:
-        f.write(result.stdout)
+    # 3️⃣ Write JSON output
+    with open(json_path, "w") as jf:
+        jf.write(result.stdout)
 
+    # 4️⃣ Update session
     s["pcap_path"] = pcap_path
     s["json_path"] = json_path
+    s.setdefault("created_at", time.time())
     return json_path
 
 # ──────────────────────────────────────────────────────────────
