@@ -1,86 +1,100 @@
-🦈 Packet Buddy Extension (PCAP → JSON → AI Analysis)
+🧠 Packet Copilot (File Search MCP Edition)
 
-This extension connects Gemini-CLI to the Packet Copilot MCP Server, giving you a full AI-driven packet-analysis workflow.
-It lets you upload, convert, sanitize, index, and query packet captures directly from Gemini-CLI using simple /pcap: commands.
+An AI-powered packet-analysis agent built with FastMCP, tshark, and Gemini File Search.
+Upload a .pcap or .pcapng, convert it to JSON locally, index it in Gemini File Search, and ask Gemini 2.5 Flash grounded questions about the traffic — no local embeddings or databases required.
 
-⚙️ Commands
+⚙️ Slash Commands
+/packetcopilot:analyze
 
-/pcap — quick help and examples.
+Description:
+Upload, convert, index, and analyze a PCAP file using Gemini File Search in one automated flow.
 
-/pcap:new — start a new Packet Buddy analysis session.
-Returns a unique session_id that subsequent commands reuse.
-
-/pcap:upload — upload a .pcap or .pcapng file (base64-encoded behind the scenes).
 Args:
-• path (local path to capture)
-• session_id (optional; auto-creates if omitted)
 
-/pcap:convert — run tshark -T json on the uploaded file.
-Args: session_id
+question (string) – Your analysis prompt (e.g. "Summarize Layer 2–4 traffic")
 
-/pcap:sanitize — strip heavy payloads, hex blobs, and PII.
-Args: session_id, aggressive (bool, default false)
+path (optional, default ./capture.pcap) – Path to your local capture file
 
-/pcap:index — build embeddings & Chroma vector DB for RAG.
-Args: session_id
+Flow executed behind the scenes:
 
-/pcap:describe — return quick stats (total packets, top ports, talkers).
-Args: session_id
+Generate a new UUID session ID
 
-/pcap:analyze — ask GPT-4o any question about the capture.
-Args: session_id, question (string)
+Base64-encode the capture
 
-/pcap:cleanup — delete temporary artifacts for that session.
-Args: session_id
+Call convert_to_json to run tshark -T json locally
 
-🧭 Typical Flow
-/pcap:new
-/pcap:upload path=./captures/capture.pcap
-/pcap:convert
-/pcap:sanitize aggressive=true
-/pcap:index
-/pcap:describe
-/pcap:analyze "Summarize major protocols and top talkers"
-/pcap:cleanup
+Upload the JSON to Gemini File Search via upload_and_index
 
-This flow is automated by Gemini-CLI you use need to provide the prompt and path the pcap. 
+Run analyze_pcap to ask your question grounded on the indexed JSON
 
-🧠 What Packet Buddy Does
+Example:
 
-Converts PCAP → structured JSON via tshark
+/packetcopilot:analyze "Give me a Layer 2–4 summary of capture.pcap"
 
-Sanitizes payloads to protect sensitive data
+🧩 MCP Tools Exposed
+Tool	Purpose	Example
+convert_to_json	Runs tshark -T json on a local or base64 upload	mcp tools call convert_to_json --arguments '{"session_id":"abc","filename":"capture.pcap"}'
+upload_and_index	Uploads the generated JSON to Gemini File Search for grounding	mcp tools call upload_and_index --arguments '{"session_id":"abc"}'
+analyze_pcap	Asks Gemini 2.5 Flash a question grounded on the JSON store	mcp tools call analyze_pcap --arguments '{"session_id":"abc","question":"Summarize TCP activity"}'
+cleanup	Deletes temporary session files and directories	mcp tools call cleanup --arguments '{"session_id":"abc"}'
+🧭 Typical Workflow
+/packetcopilot:analyze "Which protocols dominate this capture?"
 
-Generates semantic chunks → embeddings → Chroma DB
 
-Uses GPT-4o for deep packet analysis & troubleshooting
+or manually:
 
-Returns answers in Markdown with emoji and protocol context
+SESSION=$(uuidgen)
+mcp tools call convert_to_json   --arguments "{\"session_id\":\"$SESSION\",\"filename\":\"capture.pcap\"}"
+mcp tools call upload_and_index  --arguments "{\"session_id\":\"$SESSION\"}"
+mcp tools call analyze_pcap      --arguments "{\"session_id\":\"$SESSION\",\"question\":\"Summarize Layer 2–4 flows\"}"
+mcp tools call cleanup           --arguments "{\"session_id\":\"$SESSION\"}"
 
+🧠 What Packet Copilot Does
+Stage	Description
+Convert	Parses PCAP locally via tshark -T json for structured packet data
+Upload	Pushes the JSON to Gemini File Search for cloud indexing and grounding
+Analyze	Sends your question to Gemini 2.5 Flash with File Search context
+Cleanup	Removes temporary local directories and files on completion
 📡 Example Prompts
 
-“Which hosts exchanged the most traffic?”
+“Summarize the Layer 2–4 traffic patterns.”
 
-“Do you see any packet loss or retransmissions?”
+“Which hosts exchanged the most data?”
 
-“List the DNS queries observed in this capture.”
+“List DNS queries and responses observed.”
 
-“Summarize HTTP requests and responses.”
+“Any TCP retransmissions or resets?”
 
-“Show BGP session establishments and state changes.”
+“Explain the main protocols and ports in this capture.”
 
-🔒 Safety
+☁️ Architecture Highlights
 
-Payload scrubbing removes hex blobs
+✅ tshark used for local parsing (no external binaries required)
 
-Keeps each session isolated in a temporary directory
+✅ Gemini File Search handles embedding + retrieval (cloud RAG)
 
-You own your data — no uploads outside your machine
+✅ No local Chroma DB or LangChain dependencies
+
+✅ Sessions are ephemeral and isolated in temporary directories
+
+✅ Gemini 2.5 Flash provides grounded, cited answers
+
+🔒 Safety & Privacy
+
+PCAP processing is local via tshark.
+
+Only structured JSON metadata is uploaded for analysis.
+
+Temporary session directories are cleaned after each run.
+
+No raw payloads or PII are retained.
 
 🧩 Use Cases
 
-Quick protocol summaries for Wireshark captures
+Rapid AI summaries of packet captures
 
-AI-assisted troubleshooting of latency, drops, or flows
+Network troubleshooting (ports, flows, drops)
 
-Education / training — “Explain this packet like I’m a student”
+Security and protocol inspection tasks
+
+Educational walkthroughs of real traffic examples
