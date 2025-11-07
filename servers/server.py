@@ -76,18 +76,22 @@ def upload_and_index(session_id: str) -> str:
         config={"display_name": f"pcap_store_{session_id}"}
     )
 
+    # 👇 Handle both SDK return types
+    store_name = store.name if hasattr(store, "name") else store
+
     op = client.file_search_stores.upload_to_file_search_store(
-        file_search_store_name=store.name,
+        file_search_store_name=store_name,
         file=json_path,
         config={"display_name": os.path.basename(json_path)}
     )
 
-    while not op.done:
+    while not getattr(op, "done", True):
         time.sleep(2)
         op = client.operations.get(op.name)
 
-    s["store_name"] = store.name
-    return f"✅ Uploaded {json_path} to File Search store {store.name}"
+    s["store_name"] = store_name
+    return f"✅ Uploaded {json_path} to File Search store {store_name}"
+
 
 # ──────────────────────────────────────────────
 # 3️⃣ Ask a grounded question
