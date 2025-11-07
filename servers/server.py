@@ -77,28 +77,30 @@ def upload_and_index(session_id: str) -> str:
     if not json_path or not os.path.exists(json_path):
         raise ValueError("No JSON found. Run convert_to_json first.")
 
-    # ── 1️⃣  Create File Search Store ───────────────────────────────────────
+    # ── 1️⃣ Create File Search Store ───────────────────────────────────────
     store_obj = client.file_search_stores.create(
         config={"display_name": f"pcap_store_{session_id}"}
     )
 
-    # Normalize possible return types (SDK version safe)
-    if hasattr(store_obj, "name"):
-        store_name = store_obj.name
+    # Normalize immediately, *before* touching `.name`
+    if isinstance(store_obj, str):
+        store_name = store_obj
     elif isinstance(store_obj, dict) and "name" in store_obj:
         store_name = store_obj["name"]
-    elif isinstance(store_obj, str):
-        store_name = store_obj
+    elif hasattr(store_obj, "name"):
+        store_name = store_obj.name
     else:
-        raise TypeError(f"Unexpected store object: {store_obj}")
+        raise TypeError(f"Unexpected FileSearchStore response: {store_obj!r}")
 
-    # ── 2️⃣  Upload file ────────────────────────────────────────────────────
+    print(f"🪣 Created FileSearchStore: {store_name}")
+
+    # ── 2️⃣ Upload file ────────────────────────────────────────────────────
     op = client.file_search_stores.upload_to_file_search_store(
         file_search_store_name=store_name,
         file=json_path,
         config={
             "display_name": os.path.basename(json_path),
-            "mime_type": "text/plain",
+            "mime_type": "application/json",  # ✅ correct MIME
             "chunking_config": {
                 "white_space_config": {
                     "max_tokens_per_chunk": 500,
@@ -108,9 +110,9 @@ def upload_and_index(session_id: str) -> str:
         },
     )
 
-    # ── 3️⃣  Poll until indexing completes ─────────────────────────────────
+    # ── 3️⃣ Poll until indexing completes ─────────────────────────────────
     op_name = getattr(op, "name", op if isinstance(op, str) else str(op))
-    for _ in range(60):  # ~2 minutes
+    for _ in range(60):
         current = client.operations.get(op_name)
         if getattr(current, "done", False) or (
             isinstance(current, dict) and current.get("done")
@@ -120,7 +122,6 @@ def upload_and_index(session_id: str) -> str:
 
     s["store_name"] = store_name
     return f"✅ Uploaded and indexed {json_path} to Gemini File Search store: {store_name}"
-
 
 # ──────────────────────────────────────────────
 # 3️⃣ Analyze → Gemini 2.5 Flash
