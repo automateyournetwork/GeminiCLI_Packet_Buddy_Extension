@@ -14,6 +14,7 @@ SESSIONS = defaultdict(dict)
 
 
 def _session(session_id: str):
+    """Create or retrieve session scratch directory."""
     s = SESSIONS[session_id]
     if "dir" not in s:
         s["dir"] = tempfile.mkdtemp(prefix=f"pcap_{session_id}_")
@@ -28,6 +29,7 @@ def convert_to_json(session_id: str, filename: str = "", data_b64: str = "") -> 
     """Convert a .pcap to JSON using tshark. Accepts either a local file or base64 data."""
     s = _session(session_id)
 
+    # Write PCAP to temp if base64 provided
     if filename and os.path.exists(filename):
         pcap_path = filename
     else:
@@ -39,16 +41,21 @@ def convert_to_json(session_id: str, filename: str = "", data_b64: str = "") -> 
 
     json_path = os.path.join(s["dir"], os.path.basename(pcap_path) + ".json")
 
-    result = subprocess.run(["tshark", "-nlr", pcap_path, "-T", "json"],
-                            capture_output=True, text=True)
+    # Convert using tshark
+    result = subprocess.run(
+        ["tshark", "-nlr", pcap_path, "-T", "json"],
+        capture_output=True, text=True
+    )
 
-    # fallback: pcapng → libpcap
+    # fallback for pcapng
     if result.returncode != 0:
-        if "pcapng" in result.stderr:
+        if "pcapng" in result.stderr.lower():
             fixed = pcap_path + ".fixed"
             subprocess.run(["editcap", "-F", "libpcap", pcap_path, fixed], check=True)
-            result = subprocess.run(["tshark", "-nlr", fixed, "-T", "json"],
-                                    capture_output=True, text=True)
+            result = subprocess.run(
+                ["tshark", "-nlr", fixed, "-T", "json"],
+                capture_output=True, text=True
+            )
         if result.returncode != 0:
             raise RuntimeError(f"tshark failed: {result.stderr}")
 
@@ -75,6 +82,7 @@ def upload_and_index(session_id: str) -> str:
         config={"display_name": f"pcap_store_{session_id}"}
     )
 
+    # Normalize possible return types (SDK version safe)
     if hasattr(store_obj, "name"):
         store_name = store_obj.name
     elif isinstance(store_obj, dict) and "name" in store_obj:
@@ -84,13 +92,13 @@ def upload_and_index(session_id: str) -> str:
     else:
         raise TypeError(f"Unexpected store object: {store_obj}")
 
-    # ── 2️⃣  Upload file (using `config`, not `body`) ───────────────────────
+    # ── 2️⃣  Upload file ────────────────────────────────────────────────────
     op = client.file_search_stores.upload_to_file_search_store(
         file_search_store_name=store_name,
-        file=json_path,  # can be path or file-like object
+        file=json_path,
         config={
             "display_name": os.path.basename(json_path),
-            "mime_type": "text/plain",
+            "mime_type": "application/json",
             "chunking_config": {
                 "white_space_config": {
                     "max_tokens_per_chunk": 500,
@@ -100,9 +108,9 @@ def upload_and_index(session_id: str) -> str:
         },
     )
 
-    # ── 3️⃣  Poll until indexing is done ────────────────────────────────────
+    # ── 3️⃣  Poll until indexing completes ─────────────────────────────────
     op_name = getattr(op, "name", op if isinstance(op, str) else str(op))
-    for _ in range(60):  # ~2 min max
+    for _ in range(60):  # ~2 minutes
         current = client.operations.get(op_name)
         if getattr(current, "done", False) or (
             isinstance(current, dict) and current.get("done")
@@ -113,6 +121,8 @@ def upload_and_index(session_id: str) -> str:
     s["store_name"] = store_name
     return f"✅ Uploaded and indexed {json_path} to Gemini File Search store: {store_name}"
 
+
+# ──────────────────────────────────────────────
 # 3️⃣ Analyze → Gemini 2.5 Flash
 # ──────────────────────────────────────────────
 @mcp.tool
@@ -127,16 +137,20 @@ def analyze_pcap(session_id: str, question: str) -> dict:
         model="gemini-2.5-flash",
         contents=question,
         config=types.GenerateContentConfig(
-            tools=[types.Tool(
-                file_search=types.FileSearch(
-                    file_search_store_names=[store_name]
+            tools=[
+                types.Tool(
+                    file_search=types.FileSearch(
+                        file_search_store_names=[store_name]
+                    )
                 )
-            )]
-        )
+            ]
+        ),
     )
 
     grounding = getattr(resp.candidates[0], "grounding_metadata", None)
-    sources = [c.retrieved_context.title for c in getattr(grounding, "grounding_chunks", [])]
+    sources = []
+    if grounding and getattr(grounding, "grounding_chunks", None):
+        sources = [c.retrieved_context.title for c in grounding.grounding_chunks]
 
     return {"answer": resp.text, "sources": sources, "meta": {"store": store_name}}
 
@@ -146,6 +160,7 @@ def analyze_pcap(session_id: str, question: str) -> dict:
 # ──────────────────────────────────────────────
 @mcp.tool
 def cleanup(session_id: str) -> str:
+    """Delete temp directory and remove session from cache."""
     s = SESSIONS.pop(session_id, None)
     if s and (d := s.get("dir")) and os.path.exists(d):
         shutil.rmtree(d, ignore_errors=True)
