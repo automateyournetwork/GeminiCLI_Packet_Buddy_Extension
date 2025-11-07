@@ -70,7 +70,7 @@ def upload_and_index(session_id: str) -> str:
     if not json_path or not os.path.exists(json_path):
         raise ValueError("No JSON found. Run convert_to_json first.")
 
-    # 1️⃣  Create the File Search store
+    # 1️⃣ Create the File Search store
     store = client.file_search_stores.create(
         config={"display_name": f"pcap_store_{session_id}"}
     )
@@ -78,22 +78,28 @@ def upload_and_index(session_id: str) -> str:
     # Normalize: sometimes an object with .name, sometimes already a string
     store_name = store.name if hasattr(store, "name") else str(store)
 
-    # 2️⃣  Upload the file and start indexing
-    op = client.file_search_stores.upload_to_file_search_store(
+    # 2️⃣ Upload the file and get the operation *name* (string)
+    # This is the start of the fix.
+    op_name = client.file_search_stores.upload_to_file_search_store(
         file_search_store_name=store_name,
         file=json_path,
         config={"display_name": os.path.basename(json_path)},
     )
 
-    # 3️⃣  Poll until indexing is complete
+    # 3️⃣ Get the actual operation *object* from its name
+    op = client.operations.get(op_name)
+
+    # 4️⃣ Poll the *object* until indexing is complete
+    # Now 'op' is an object, so op.name and op.done will work.
     while not getattr(op, "done", False):
         time.sleep(2)
+        # Refresh the operation object by getting it again
         op = client.operations.get(op.name)
+    
+    # This is the end of the fix.
 
     s["store_name"] = store_name
     return f"✅ Uploaded and indexed {json_path} to Gemini File Search store: {store_name}"
-
-
 # ──────────────────────────────────────────────
 # 3️⃣ Analyze → Gemini 2.5 Flash
 # ──────────────────────────────────────────────
