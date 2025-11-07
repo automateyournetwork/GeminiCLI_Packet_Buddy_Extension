@@ -73,20 +73,10 @@ def upload_and_index(session_id: str) -> str:
     if not json_path or not os.path.exists(json_path):
         raise ValueError("No JSON found. Run convert_to_json first.")
 
-    # Create or get the store
-    store = client.file_search_stores.create(
+    # v1.x returns store name directly (string)
+    store_name = client.file_search_stores.create(
         config={"display_name": f"pcap_store_{session_id}"}
     )
-
-    # Handle both SDK return types
-    if isinstance(store, str):
-        store_name = store
-    elif hasattr(store, "name"):
-        store_name = store.name
-    elif isinstance(store, dict) and "name" in store:
-        store_name = store["name"]
-    else:
-        raise TypeError(f"Unexpected store return type: {type(store)}")
 
     # Upload file to File Search store
     op = client.file_search_stores.upload_to_file_search_store(
