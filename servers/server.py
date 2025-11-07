@@ -71,33 +71,37 @@ def upload_and_index(session_id: str) -> str:
         raise ValueError("No JSON found. Run convert_to_json first.")
 
     # --- Create the File Search Store ---
+    # The create() method returns a FileSearchStore object directly
     store_obj = client.file_search_stores.create(
-        config={"display_name": f"pcap_store_{session_id}"}
+        display_name=f"pcap_store_{session_id}"  # Changed from config={"display_name": ...}
     )
-
-    # Normalize absolutely every possible response type
-    if isinstance(store_obj, str):
-        store_name = store_obj
-    elif hasattr(store_obj, "name"):
+    
+    # Extract the store name - it should be in the 'name' field
+    if hasattr(store_obj, 'name'):
         store_name = store_obj.name
-    elif isinstance(store_obj, dict) and "name" in store_obj:
-        store_name = store_obj["name"]
+    elif isinstance(store_obj, dict) and 'name' in store_obj:
+        store_name = store_obj['name']
     else:
-        raise TypeError(f"Unrecognized store_obj type: {type(store_obj)} ({store_obj})")
+        # Debug: print the actual object to see what we're getting
+        raise TypeError(f"Cannot extract name from store_obj. Type: {type(store_obj)}, Content: {store_obj}")
 
     # --- Upload to File Search Store ---
-    op = client.file_search_stores.upload_to_file_search_store(
-        file_search_store_name=str(store_name),
-        file=json_path,
-        config={"display_name": os.path.basename(json_path)},
-    )
+    with open(json_path, 'rb') as f:
+        op = client.file_search_stores.upload_to_file_search_store(
+            file_search_store_name=store_name,
+            file=f,  # Pass the file object, not the path
+            config={
+                "display_name": os.path.basename(json_path),
+                "mime_type": "application/json"
+            }
+        )
 
     # --- Poll until indexing is complete ---
-    while not getattr(op, "done", False):
+    while not getattr(op, 'done', False):
         time.sleep(2)
-        op = client.operations.get(op.name)
+        op = client.operations.get(name=op.name)  # Use name= parameter
 
-    s["store_name"] = str(store_name)
+    s["store_name"] = store_name
     return f"✅ Uploaded and indexed {json_path} to Gemini File Search store: {store_name}"
 # ──────────────────────────────────────────────
 # 3️⃣ Analyze → Gemini 2.5 Flash
