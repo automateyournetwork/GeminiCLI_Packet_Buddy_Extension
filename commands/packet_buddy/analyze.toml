@@ -1,23 +1,17 @@
-name = "/packet_buddy:analyze"
-description = "Upload, convert, sanitize, index, and analyze a PCAP in one step."
+name = "/packetcopilot:analyze"
+description = "Upload, convert, index, and analyze a PCAP using Gemini File Search."
 args = ["question", "path?=./capture.pcap"]
 prompt = """
-SESSION=$(mcp tools call new_session | jq -r .result)
+SESSION=$(uuidgen)
 echo "🆕  Session: $SESSION"
 
 echo "📤  Uploading $path …"
 BASE64=$(base64 -w 0 "$path")
-mcp tools call upload_pcap_base64 --arguments "{\\"session_id\\": \\"$SESSION\\", \\"filename\\": \\"$(basename "$path")\\", \\"data_b64\\": \\"$BASE64\\"}"
-
-echo "🔄  Converting to JSON …"
-mcp tools call convert_to_json --arguments "{\\"session_id\\": \\"$SESSION\\"}"
-
-echo "🧹  Sanitizing payloads …"
-mcp tools call sanitize_json --arguments "{\\"session_id\\": \\"$SESSION\\", \\"aggressive\\": true}"
+mcp tools call convert_to_json --arguments "{\\"session_id\\": \\"$SESSION\\", \\"filename\\": \\"$(basename "$path")\\", \\"data_b64\\": \\"$BASE64\\"}"
 
 echo "📚  Indexing capture …"
-mcp tools call index_pcap --arguments "{\\"session_id\\": \\"$SESSION\\"}"
+mcp tools call upload_and_index --arguments "{\\"session_id\\": \\"$SESSION\\"}"
 
-echo "🤖  Running AI analysis …"
+echo "🤖  Asking Gemini File Search …"
 mcp tools call analyze_pcap --arguments "{\\"session_id\\": \\"$SESSION\\", \\"question\\": \\"$question\\"}"
 """
