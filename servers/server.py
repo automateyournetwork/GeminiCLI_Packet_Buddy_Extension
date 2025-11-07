@@ -67,31 +67,41 @@ def convert_to_json(session_id: str, filename: str = "", data_b64: str = "") -> 
 # ──────────────────────────────────────────────
 @mcp.tool
 def upload_and_index(session_id: str) -> str:
+    """Upload JSON to Gemini File Search and wait for indexing."""
     s = _session(session_id)
     json_path = s.get("json_path")
     if not json_path or not os.path.exists(json_path):
         raise ValueError("No JSON found. Run convert_to_json first.")
 
+    # Create or get the store
     store = client.file_search_stores.create(
         config={"display_name": f"pcap_store_{session_id}"}
     )
 
-    # 👇 Handle both SDK return types
-    store_name = store.name if hasattr(store, "name") else store
+    # Handle both SDK return types
+    if isinstance(store, str):
+        store_name = store
+    elif hasattr(store, "name"):
+        store_name = store.name
+    elif isinstance(store, dict) and "name" in store:
+        store_name = store["name"]
+    else:
+        raise TypeError(f"Unexpected store return type: {type(store)}")
 
+    # Upload file to File Search store
     op = client.file_search_stores.upload_to_file_search_store(
         file_search_store_name=store_name,
         file=json_path,
-        config={"display_name": os.path.basename(json_path)}
+        config={"display_name": os.path.basename(json_path)},
     )
 
-    while not getattr(op, "done", True):
+    # Poll until indexing is complete
+    while not getattr(op, "done", False):
         time.sleep(2)
         op = client.operations.get(op.name)
 
     s["store_name"] = store_name
-    return f"✅ Uploaded {json_path} to File Search store {store_name}"
-
+    return f"✅ Uploaded and indexed {json_path} to Gemini File Search store: {store_name}"
 
 # ──────────────────────────────────────────────
 # 3️⃣ Ask a grounded question
