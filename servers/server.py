@@ -70,13 +70,12 @@ def upload_and_index(session_id: str) -> str:
     if not json_path or not os.path.exists(json_path):
         raise ValueError("No JSON found. Run convert_to_json first.")
 
-    # --- Create the File Search Store ---
-    # Pass the FileSearchStore object as the body parameter
-    store_obj = client.file_search_stores.create(
-        body={
-            "display_name": f"pcap_store_{session_id}"
-        }
-    )
+    # --- Create the File Search Store with no args to see what happens ---
+    try:
+        store_obj = client.file_search_stores.create()
+    except TypeError as e:
+        # If it fails, try to get helpful error message about what it expects
+        raise TypeError(f"create() signature issue: {e}. Try checking client.file_search_stores.create.__doc__ or __signature__")
     
     # Extract the store name
     if hasattr(store_obj, 'name'):
