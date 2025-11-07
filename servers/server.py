@@ -64,41 +64,40 @@ def convert_to_json(session_id: str, filename: str = "", data_b64: str = "") -> 
 # ──────────────────────────────────────────────
 @mcp.tool
 def upload_and_index(session_id: str) -> str:
-    """Upload JSON to Gemini File Search and wait for indexing."""
+    """Upload JSON to Gemini File Search deterministically."""
     s = _session(session_id)
     json_path = s.get("json_path")
     if not json_path or not os.path.exists(json_path):
         raise ValueError("No JSON found. Run convert_to_json first.")
 
-    # 1️⃣ Create the File Search store
-    store = client.file_search_stores.create(
+    # --- Create the File Search Store ---
+    store_obj = client.file_search_stores.create(
         config={"display_name": f"pcap_store_{session_id}"}
     )
 
-    # Normalize: sometimes an object with .name, sometimes already a string
-    store_name = store.name if hasattr(store, "name") else str(store)
+    # Normalize absolutely every possible response type
+    if isinstance(store_obj, str):
+        store_name = store_obj
+    elif hasattr(store_obj, "name"):
+        store_name = store_obj.name
+    elif isinstance(store_obj, dict) and "name" in store_obj:
+        store_name = store_obj["name"]
+    else:
+        raise TypeError(f"Unrecognized store_obj type: {type(store_obj)} ({store_obj})")
 
-    # 2️⃣ Upload the file and get the operation *name* (string)
-    # This is the start of the fix.
-    op_name = client.file_search_stores.upload_to_file_search_store(
-        file_search_store_name=store_name,
+    # --- Upload to File Search Store ---
+    op = client.file_search_stores.upload_to_file_search_store(
+        file_search_store_name=str(store_name),
         file=json_path,
         config={"display_name": os.path.basename(json_path)},
     )
 
-    # 3️⃣ Get the actual operation *object* from its name
-    op = client.operations.get(op_name)
-
-    # 4️⃣ Poll the *object* until indexing is complete
-    # Now 'op' is an object, so op.name and op.done will work.
+    # --- Poll until indexing is complete ---
     while not getattr(op, "done", False):
         time.sleep(2)
-        # Refresh the operation object by getting it again
         op = client.operations.get(op.name)
-    
-    # This is the end of the fix.
 
-    s["store_name"] = store_name
+    s["store_name"] = str(store_name)
     return f"✅ Uploaded and indexed {json_path} to Gemini File Search store: {store_name}"
 # ──────────────────────────────────────────────
 # 3️⃣ Analyze → Gemini 2.5 Flash
