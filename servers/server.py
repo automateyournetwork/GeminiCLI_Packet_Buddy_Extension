@@ -12,23 +12,22 @@ mcp = FastMCP("PacketCopilot_FileSearch")
 
 SESSIONS = defaultdict(dict)
 
+
 def _session(session_id: str):
     s = SESSIONS[session_id]
     if "dir" not in s:
         s["dir"] = tempfile.mkdtemp(prefix=f"pcap_{session_id}_")
     return s
 
+
 # ──────────────────────────────────────────────
 # 1️⃣ Convert PCAP → JSON (robust)
 # ──────────────────────────────────────────────
 @mcp.tool
 def convert_to_json(session_id: str, filename: str = "", data_b64: str = "") -> str:
-    """
-    Convert a .pcap to JSON using tshark. Accepts either a local file or base64 data.
-    """
+    """Convert a .pcap to JSON using tshark. Accepts either a local file or base64 data."""
     s = _session(session_id)
 
-    # prefer direct file if it exists
     if filename and os.path.exists(filename):
         pcap_path = filename
     else:
@@ -40,18 +39,15 @@ def convert_to_json(session_id: str, filename: str = "", data_b64: str = "") -> 
 
     json_path = os.path.join(s["dir"], os.path.basename(pcap_path) + ".json")
 
-    result = subprocess.run(
-        ["tshark", "-nlr", pcap_path, "-T", "json"],
-        capture_output=True,
-        text=True
-    )
+    result = subprocess.run(["tshark", "-nlr", pcap_path, "-T", "json"],
+                            capture_output=True, text=True)
 
-    # fallback: convert from pcapng → libpcap if needed
+    # fallback: pcapng → libpcap
     if result.returncode != 0:
         if "pcapng" in result.stderr:
-            fixed_path = pcap_path + ".fixed"
-            subprocess.run(["editcap", "-F", "libpcap", pcap_path, fixed_path], check=True)
-            result = subprocess.run(["tshark", "-nlr", fixed_path, "-T", "json"],
+            fixed = pcap_path + ".fixed"
+            subprocess.run(["editcap", "-F", "libpcap", pcap_path, fixed], check=True)
+            result = subprocess.run(["tshark", "-nlr", fixed, "-T", "json"],
                                     capture_output=True, text=True)
         if result.returncode != 0:
             raise RuntimeError(f"tshark failed: {result.stderr}")
@@ -62,8 +58,9 @@ def convert_to_json(session_id: str, filename: str = "", data_b64: str = "") -> 
     s["pcap_path"], s["json_path"] = pcap_path, json_path
     return json_path
 
+
 # ──────────────────────────────────────────────
-# 2️⃣ Upload JSON to Gemini File Search
+# 2️⃣ Upload JSON → Gemini File Search
 # ──────────────────────────────────────────────
 @mcp.tool
 def upload_and_index(session_id: str) -> str:
@@ -73,20 +70,18 @@ def upload_and_index(session_id: str) -> str:
     if not json_path or not os.path.exists(json_path):
         raise ValueError("No JSON found. Run convert_to_json first.")
 
-    # Handles both string and object return types
+    # Handle string / object return types
     store_obj = client.file_search_stores.create(
         config={"display_name": f"pcap_store_{session_id}"}
     )
     store_name = getattr(store_obj, "name", store_obj)
 
-    # Upload to store
     op = client.file_search_stores.upload_to_file_search_store(
         file_search_store_name=store_name,
         file=json_path,
         config={"display_name": os.path.basename(json_path)},
     )
 
-    # Wait for indexing
     while not getattr(op, "done", False):
         time.sleep(2)
         op = client.operations.get(op.name)
@@ -94,11 +89,13 @@ def upload_and_index(session_id: str) -> str:
     s["store_name"] = store_name
     return f"✅ Uploaded and indexed {json_path} to Gemini File Search store: {store_name}"
 
+
 # ──────────────────────────────────────────────
-# 3️⃣ Ask a grounded question
+# 3️⃣ Analyze → Gemini 2.5 Flash
 # ──────────────────────────────────────────────
 @mcp.tool
 def analyze_pcap(session_id: str, question: str) -> dict:
+    """Ask Gemini 2.5 Flash a grounded question on the indexed JSON."""
     s = _session(session_id)
     store_name = s.get("store_name")
     if not store_name:
@@ -117,15 +114,10 @@ def analyze_pcap(session_id: str, question: str) -> dict:
     )
 
     grounding = getattr(resp.candidates[0], "grounding_metadata", None)
-    sources = []
-    if grounding and grounding.grounding_chunks:
-        sources = [c.retrieved_context.title for c in grounding.grounding_chunks]
+    sources = [c.retrieved_context.title for c in getattr(grounding, "grounding_chunks", [])]
 
-    return {
-        "answer": resp.text,
-        "sources": sources,
-        "meta": {"store": store_name}
-    }
+    return {"answer": resp.text, "sources": sources, "meta": {"store": store_name}}
+
 
 # ──────────────────────────────────────────────
 # 4️⃣ Cleanup
@@ -136,6 +128,7 @@ def cleanup(session_id: str) -> str:
     if s and (d := s.get("dir")) and os.path.exists(d):
         shutil.rmtree(d, ignore_errors=True)
     return "ok"
+
 
 if __name__ == "__main__":
     mcp.run()
