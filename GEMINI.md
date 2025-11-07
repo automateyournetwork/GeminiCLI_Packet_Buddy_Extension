@@ -8,3 +8,5 @@ prompt = """
 3 - Convert the base64 to JSON using Packet Buddy API
 4 - Upload the JSON to Gemini File Search
 5 - Use Gemini File Search to answer the question based on the uploaded JSON
+
+"""
