@@ -93,7 +93,7 @@ def upload_and_index(session_id: str) -> str:
             "mime_type": "application/json",
             "chunking_config": {
                 "white_space_config": {
-                    "max_tokens_per_chunk": 2000,
+                    "max_tokens_per_chunk": 500,
                     "max_overlap_tokens": 100,
                 }
             },
