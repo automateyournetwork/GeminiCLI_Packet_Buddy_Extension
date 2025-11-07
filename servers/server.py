@@ -100,7 +100,7 @@ def upload_and_index(session_id: str) -> str:
         file=json_path,
         config={
             "display_name": os.path.basename(json_path),
-            "mime_type": "application/json",  # ✅ correct MIME
+            "mime_type": "text/plain",  # ✅ correct MIME
             "chunking_config": {
                 "white_space_config": {
                     "max_tokens_per_chunk": 500,
