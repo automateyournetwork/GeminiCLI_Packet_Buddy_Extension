@@ -82,13 +82,15 @@ def upload_and_index(session_id: str) -> str:
         raise TypeError(f"Cannot extract name. Type: {type(store_obj)}, Content: {store_obj}")
 
     # --- Upload to File Search Store ---
-    # The parameters should be at the top level, not nested in 'config'
+    # According to the API docs, the request body should contain the metadata
     with open(json_path, 'rb') as f:
         op = client.file_search_stores.upload_to_file_search_store(
             file_search_store_name=store_name,
             file=f,
-            display_name=os.path.basename(json_path),  # Direct parameter
-            mime_type="application/json"  # Direct parameter, proper format
+            body={
+                "display_name": os.path.basename(json_path),
+                "mime_type": "application/json"
+            }
         )
 
     # --- Poll until indexing is complete ---
