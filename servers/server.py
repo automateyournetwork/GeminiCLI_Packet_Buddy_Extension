@@ -73,19 +73,20 @@ def upload_and_index(session_id: str) -> str:
     if not json_path or not os.path.exists(json_path):
         raise ValueError("No JSON found. Run convert_to_json first.")
 
-    # v1.x returns store name directly (string)
-    store_name = client.file_search_stores.create(
+    # Handles both string and object return types
+    store_obj = client.file_search_stores.create(
         config={"display_name": f"pcap_store_{session_id}"}
     )
+    store_name = getattr(store_obj, "name", store_obj)
 
-    # Upload file to File Search store
+    # Upload to store
     op = client.file_search_stores.upload_to_file_search_store(
         file_search_store_name=store_name,
         file=json_path,
         config={"display_name": os.path.basename(json_path)},
     )
 
-    # Poll until indexing is complete
+    # Wait for indexing
     while not getattr(op, "done", False):
         time.sleep(2)
         op = client.operations.get(op.name)
