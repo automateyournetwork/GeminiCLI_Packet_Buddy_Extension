@@ -1,17 +1,17 @@
 name = "/packetcopilot:analyze"
-description = "Upload, convert, index, and analyze a PCAP using Gemini File Search."
+description = "Convert, sanitize, upload, and analyze a PCAP using Gemini File Search."
 args = ["question", "path?=./capture.pcap"]
 prompt = """
-SESSION=$(uuidgen)
-echo "🆕  Session: $SESSION"
-
-echo "📤  Uploading $path …"
+echo "📤 Converting $path → JSON …"
 BASE64=$(base64 -w 0 "$path")
-mcp call convert_to_json --arguments "{\\"session_id\\": \\"$SESSION\\", \\"filename\\": \\"$(basename "$path")\\", \\"data_b64\\": \\"$BASE64\\"}"
+JSON_PATH=$(mcp call convert_to_json --arguments "{\\"filename\\": \\"$(basename "$path)\\", \\"data_b64\\": \\"$BASE64\\"}" | jq -r '.')
 
-echo "📚  Indexing capture …"
-mcp call upload_and_index --arguments "{\\"session_id\\": \\"$SESSION\\"}"
+echo "🧼 Sanitizing JSON …"
+SANITIZED=$(mcp call sanitize_json --arguments "{\\"json_path\\": \\"$JSON_PATH\\", \\"aggressive\\": true}" | jq -r '.')
 
-echo "🤖  Asking Gemini File Search …"
-mcp call analyze_pcap --arguments "{\\"session_id\\": \\"$SESSION\\", \\"question\\": \\"$question\\"}"
+echo "📚 Uploading to Gemini File Search …"
+STORE_NAME=$(mcp call upload_and_index --arguments "{\\"json_path\\": \\"$SANITIZED\\"}" | jq -r '.')
+
+echo "🤖 Asking Gemini …"
+mcp call analyze_pcap --arguments "{\\"store_name\\": \\"$STORE_NAME\\", \\"question\\": \\"$question\\"}"
 """
