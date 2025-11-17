@@ -41,7 +41,7 @@ def count_tokens(text: str) -> int:
 
 
 # =====================================================================
-# SAFE JSON NORMALIZATION (for TOON)
+# SAFE JSON NORMALIZATION (TOON requirement)
 # =====================================================================
 def make_json_safe(obj: Any) -> Any:
     if isinstance(obj, dict):
@@ -53,33 +53,35 @@ def make_json_safe(obj: Any) -> Any:
 
 
 # =====================================================================
-# TOON CONVERSION FUNCTION
+# TOON CONVERSION LOGIC
 # =====================================================================
 def toon_with_stats(pyats_json: Any) -> tuple[str, str]:
     """
-    Input: parsed JSON from tshark (sanitized)
-    Returns:
-      toon_text (string)
-      stats_report (string)
+    Convert sanitized JSON → TOON + token savings
     """
     safe = make_json_safe(pyats_json)
     json_str = json.dumps(safe, indent=2)
 
+    # Write temp JSON
     with tempfile.NamedTemporaryFile(mode="w+", suffix=".json", delete=False) as f_json:
         f_json.write(json_str)
         f_json.flush()
         src = f_json.name
         dst = f_json.name + ".toon"
 
-    cmd = ["npx", "@toon-format/cli", src, "-o", dst]
+    # Use npx with --yes to avoid interactive install prompt
+    cmd = ["npx", "--yes", "@toon-format/cli", src, "-o", dst]
     result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.returncode != 0:
         raise RuntimeError(f"TOON CLI failed:\n{result.stderr}")
 
+    if not os.path.exists(dst):
+        raise RuntimeError("TOON CLI did not produce an output file.")
+
     toon_text = open(dst).read()
 
-    # token savings
+    # Compute token savings
     j_tokens = count_tokens(json_str)
     t_tokens = count_tokens(toon_text)
 
@@ -98,7 +100,7 @@ def toon_with_stats(pyats_json: Any) -> tuple[str, str]:
 
 
 # =====================================================================
-# PCAP HEX/PAYLOAD SANITIZER
+# HEX + PAYLOAD SANITIZER
 # =====================================================================
 def _looks_like_big_hex(val: Any, min_len: int) -> bool:
     if not isinstance(val, str):
@@ -109,8 +111,8 @@ def _looks_like_big_hex(val: Any, min_len: int) -> bool:
 def _sanitize_layers(obj: Any, drop_keys: set[str], aggressive: bool, hex_len_cutoff: int):
     if isinstance(obj, dict):
         for k in list(obj.keys()):
-            # Drop heavy or unwanted keys
-            if k in drop_keys or any(k.endswith(f".{suf}") for suf in drop_keys):
+            # Drop configured heavy keys
+            if k in drop_keys or any(k.endswith(f".{suffix}") for suffix in drop_keys):
                 obj.pop(k, None)
                 continue
 
@@ -131,9 +133,9 @@ def _sanitize_layers(obj: Any, drop_keys: set[str], aggressive: bool, hex_len_cu
 # =====================================================================
 @mcp.tool
 async def convert_to_json(filename: str = "", data_b64: str = "") -> str:
-    """Convert .pcap to JSON using tshark asynchronously."""
+    """Convert .pcap to JSON using tshark."""
     if not filename and not data_b64:
-        raise ValueError("Must supply either filename or base64 data.")
+        raise ValueError("Must supply filename or base64 data.")
 
     workdir = tempfile.mkdtemp(prefix="pcap_")
     pcap_path = os.path.join(workdir, os.path.basename(filename or "capture.pcap"))
@@ -155,8 +157,8 @@ async def convert_to_json(filename: str = "", data_b64: str = "") -> str:
     stdout, stderr = await proc.communicate()
 
     if proc.returncode != 0:
+        # pcapng → libpcap convert
         if b"pcapng" in stderr.lower():
-            # convert first
             fixed = pcap_path + ".fixed"
             await asyncio.create_subprocess_exec("editcap", "-F", "libpcap", pcap_path, fixed)
             proc2 = await asyncio.create_subprocess_exec(
@@ -185,7 +187,7 @@ async def sanitize_json(json_path: str,
                         extra_drop_keys: list[str] | None = None,
                         aggressive: bool = False,
                         hex_len_cutoff: int = 256) -> str:
-    """Remove large payloads and hex blobs before indexing."""
+    """Remove large blobs / payloads before indexing."""
     if not os.path.exists(json_path):
         raise FileNotFoundError(f"{json_path} not found")
 
@@ -201,6 +203,7 @@ async def sanitize_json(json_path: str,
         _sanitize_layers(layers, drops, aggressive, hex_len_cutoff)
 
     out_path = json_path.replace(".json", f".sanitized.{int(asyncio.get_event_loop().time())}.json")
+
     with open(out_path, "w") as f:
         json.dump(data, f, indent=2)
 
@@ -217,28 +220,23 @@ async def sanitize_and_toon(json_path: str,
                             aggressive: bool = False,
                             hex_len_cutoff: int = 256) -> dict:
     """
-    Sanitize tshark JSON AND convert to TOON.
-    Returns:
-      {
-        "toon_path": "...",
-        "stats": "token savings report"
-      }
+    Correct: sanitize JSON first → THEN convert to TOON.
     """
     if not os.path.exists(json_path):
         raise FileNotFoundError(f"{json_path} not found")
 
     with open(json_path, "r") as f:
-        data = json.load(f)
+        raw = json.load(f)
 
     drops = set(DEFAULT_DROP_KEYS)
     if extra_drop_keys:
         drops.update(extra_drop_keys)
 
-    for pkt in data:
+    for pkt in raw:
         layers = pkt.get("_source", {}).get("layers", {})
         _sanitize_layers(layers, drops, aggressive, hex_len_cutoff)
 
-    toon_text, stats = toon_with_stats(data)
+    toon_text, stats = toon_with_stats(raw)
 
     toon_path = json_path.replace(".json", ".toon.txt")
     with open(toon_path, "w") as f:
@@ -249,19 +247,17 @@ async def sanitize_and_toon(json_path: str,
 
 
 # =====================================================================
-# 3️⃣ UPLOAD FOR JSON
+# 3️⃣ UPLOAD SANITIZED JSON TO FILE SEARCH
 # =====================================================================
 @mcp.tool
 async def upload_and_index(json_path: str) -> str:
-    """Upload sanitized JSON to Gemini File Search asynchronously."""
     if not os.path.exists(json_path):
         raise FileNotFoundError(f"{json_path} not found")
 
     store = client.file_search_stores.create(
         config={"display_name": f"pcap_store_{int(asyncio.get_event_loop().time())}"}
     )
-    store_name = store.name
-    print(f"🪣 Using FileSearchStore name: {store_name}")
+    store_name = store["name"]
 
     op = client.file_search_stores.upload_to_file_search_store(
         file_search_store_name=store_name,
@@ -278,10 +274,12 @@ async def upload_and_index(json_path: str) -> str:
         },
     )
 
-    op_name = op.name
+    op_name = op["name"]
+
+    # poll
     for _ in range(60):
         current = client.operations.get(op_name)
-        if getattr(current, "done", False):
+        if current.get("done"):
             break
         await asyncio.sleep(2)
 
@@ -290,19 +288,17 @@ async def upload_and_index(json_path: str) -> str:
 
 
 # =====================================================================
-# 3B️⃣ UPLOAD FOR TOON
+# 3B️⃣ UPLOAD TOON FILE
 # =====================================================================
 @mcp.tool
 async def upload_and_index_toon(toon_path: str) -> str:
-    """Upload TOON file to Gemini File Search."""
     if not os.path.exists(toon_path):
         raise FileNotFoundError(f"{toon_path} not found")
 
     store = client.file_search_stores.create(
         config={"display_name": f"toon_store_{int(asyncio.get_event_loop().time())}"}
     )
-    store_name = store.name
-    print(f"🪣 Using FileSearchStore name: {store_name}")
+    store_name = store["name"]
 
     op = client.file_search_stores.upload_to_file_search_store(
         file_search_store_name=store_name,
@@ -313,10 +309,11 @@ async def upload_and_index_toon(toon_path: str) -> str:
         },
     )
 
-    op_name = op.name
+    op_name = op["name"]
+
     for _ in range(60):
         current = client.operations.get(op_name)
-        if getattr(current, "done", False):
+        if current.get("done"):
             break
         await asyncio.sleep(2)
 
@@ -325,18 +322,16 @@ async def upload_and_index_toon(toon_path: str) -> str:
 
 
 # =====================================================================
-# 4️⃣ ANALYZE JSON RAG
+# 4️⃣ ANALYZE SANITIZED JSON
 # =====================================================================
 @mcp.tool
 async def analyze_pcap(store_name: str, question: str) -> dict:
-    """Analyze sanitized JSON using Gemini File Search."""
     if not store_name:
         raise ValueError("Missing File Search store name.")
     if not question:
         raise ValueError("Missing analysis question.")
 
-    loop = asyncio.get_event_loop()
-    resp = await loop.run_in_executor(
+    resp = await asyncio.get_event_loop().run_in_executor(
         None,
         lambda: client.models.generate_content(
             model="gemini-2.5-flash",
@@ -351,49 +346,46 @@ async def analyze_pcap(store_name: str, question: str) -> dict:
         ),
     )
 
-    grounding = getattr(resp.candidates[0], "grounding_metadata", None)
+    grounding = resp.candidates[0].grounding_metadata
     sources = []
-    if grounding and getattr(grounding, "grounding_chunks", None):
-        sources = [c.retrieved_context.title for c in grounding.grounding_chunks]
-
-    return {"answer": resp.text, "sources": sources, "store": store_name}
-
-
-
-# =====================================================================
-# 4B️⃣ ANALYZE TOON RAG
-# =====================================================================
-@mcp.tool
-async def analyze_toon(store_name: str, question: str) -> dict:
-    """Analyze TOON-formatted PCAP data with Gemini."""
-    if not store_name:
-        raise ValueError("Missing File Search store name.")
-    if not question:
-        raise ValueError("Missing analysis question.")
-
-    loop = asyncio.get_event_loop()
-    resp = await loop.run_in_executor(
-        None,
-        lambda: client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=question,
-            config=types.GenerateContentConfig(
-                tools=[
-                    types.Tool(
-                        file_search=types.FileSearch(file_search_store_names=[store_name])
-                    )
-                ]
-            ),
-        ),
-    )
-
-    grounding = getattr(resp.candidates[0], "grounding_metadata", None)
-    sources = []
-    if grounding and getattr(grounding, "grounding_chunks", None):
+    if grounding and grounding.grounding_chunks:
         sources = [c.retrieved_context.title for c in grounding.grounding_chunks]
 
     return {"answer": resp.text, "sources": sources}
 
+
+
+# =====================================================================
+# 4B️⃣ ANALYZE TOON
+# =====================================================================
+@mcp.tool
+async def analyze_toon(store_name: str, question: str) -> dict:
+    if not store_name:
+        raise ValueError("Missing File Search store name.")
+    if not question:
+        raise ValueError("Missing analysis question.")
+
+    resp = await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=question,
+            config=types.GenerateContentConfig(
+                tools=[
+                    types.Tool(
+                        file_search=types.FileSearch(file_search_store_names=[store_name])
+                    )
+                ]
+            ),
+        ),
+    )
+
+    grounding = resp.candidates[0].grounding_metadata
+    sources = []
+    if grounding and grounding.grounding_chunks:
+        sources = [c.retrieved_context.title for c in grounding.grounding_chunks]
+
+    return {"answer": resp.text, "sources": sources}
 
 
 # =====================================================================
