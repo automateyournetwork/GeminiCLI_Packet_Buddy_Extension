@@ -4,8 +4,9 @@ args = ["question", "path?=./capture.pcap"]
 prompt = """
 
 1 - Convert the PCAP JSON using Packet Buddy API
-2 - Upload the JSON to Gemini File Search
 3 - Santize the JSON to remove the drop fields
-4 - Use Gemini File Search to answer the question based on the uploaded JSON
+3 - Convert sanatized JSON to TOON
+4 - Use TOON and NOT JSON (send TOON to LLM not JSON)
+5 - Answer the users original prompt
 
 """
