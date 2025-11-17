@@ -4,7 +4,6 @@ from typing import Any
 from fastmcp import FastMCP
 from dotenv import load_dotenv
 from google import genai
-from google.genai import types
 
 # ============================================================
 # INIT
@@ -23,7 +22,7 @@ DEFAULT_DROP_KEYS = {
 }
 
 # ============================================================
-# TOKENIZER (for TOON stats)
+# TOKENIZER
 # ============================================================
 try:
     import tiktoken
@@ -32,14 +31,19 @@ except:
     tokenizer = None
 
 def count_tokens(txt: str) -> int:
-    return len(tokenizer.encode(txt)) if tokenizer else -1
+    if not tokenizer:
+        return -1
+    try:
+        return len(tokenizer.encode(txt))
+    except:
+        return -1
 
 # ============================================================
 # SAFE JSON NORMALIZATION
 # ============================================================
 def make_json_safe(obj: Any) -> Any:
     if isinstance(obj, dict):
-        return {str(k): make_json_safe(v) for k,v in obj.items()}
+        return {str(k): make_json_safe(v) for k, v in obj.items()}
     elif isinstance(obj, list):
         return [make_json_safe(v) for v in obj]
     return obj
@@ -64,13 +68,16 @@ def toon_with_stats(json_obj: Any) -> tuple[str, str]:
     if result.returncode != 0:
         raise RuntimeError(f"TOON CLI failed:\n{result.stderr}")
 
+    if not os.path.exists(dst):
+        raise RuntimeError("TOON CLI produced no output file")
+
     toon_text = open(dst).read()
 
     j_tokens = count_tokens(json_str)
     t_tokens = count_tokens(toon_text)
 
     if j_tokens > 0 and t_tokens > 0:
-        saved = 100 * (1 - (t_tokens/j_tokens))
+        saved = 100 * (1 - t_tokens / j_tokens)
         stats = (
             "=== TOKEN SAVINGS ===\n"
             f"JSON tokens: {j_tokens}\n"
@@ -83,7 +90,7 @@ def toon_with_stats(json_obj: Any) -> tuple[str, str]:
     return toon_text, stats
 
 # ============================================================
-# SANITIZATION
+# SANITIZE HELPERS
 # ============================================================
 def _looks_like_big_hex(val: Any, min_len: int) -> bool:
     if not isinstance(val, str):
@@ -103,20 +110,19 @@ def _sanitize_layers(obj: Any, drop_keys: set[str], aggressive: bool, cutoff: in
                 _sanitize_layers(v, drop_keys, aggressive, cutoff)
             elif aggressive and _looks_like_big_hex(v, cutoff):
                 obj.pop(k, None)
-
     elif isinstance(obj, list):
         for item in obj:
             _sanitize_layers(item, drop_keys, aggressive, cutoff)
 
 # ============================================================
-# 1️⃣ PCAP → JSON
+# 1️⃣ PacketBuddy: PCAP → JSON
 # ============================================================
 @mcp.tool
-async def convert_to_json(filename: str="", data_b64: str="") -> str:
+async def pb_convert_to_json(filename: str = "", data_b64: str = "") -> str:
     if not filename and not data_b64:
         raise ValueError("Must supply filename or base64 data")
 
-    work = tempfile.mkdtemp(prefix="pcap_")
+    work = tempfile.mkdtemp(prefix="pb_")
     pcap = os.path.join(work, os.path.basename(filename or "capture.pcap"))
     out_json = pcap + ".json"
 
@@ -128,35 +134,36 @@ async def convert_to_json(filename: str="", data_b64: str="") -> str:
     proc = await asyncio.create_subprocess_exec(
         "tshark", "-nlr", pcap, "-T", "json",
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
+        stderr=asyncio.subprocess.PIPE,
     )
     stdout, stderr = await proc.communicate()
 
-    # pcapng fallback
+    # fallback for pcapng
     if proc.returncode != 0 and b"pcapng" in stderr.lower():
         fixed = pcap + ".fixed"
         await asyncio.create_subprocess_exec("editcap", "-F", "libpcap", pcap, fixed)
         proc2 = await asyncio.create_subprocess_exec(
             "tshark", "-nlr", fixed, "-T", "json",
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await proc2.communicate()
-
         if proc2.returncode != 0:
             raise RuntimeError(stderr.decode())
+    elif proc.returncode != 0:
+        raise RuntimeError(stderr.decode())
 
     open(out_json, "w").write(stdout.decode())
     return out_json
 
 # ============================================================
-# 2️⃣ SANITIZE JSON
+# 2️⃣ PacketBuddy: SANITIZE JSON
 # ============================================================
 @mcp.tool
-async def sanitize_json(json_path: str,
-                        extra_drop_keys=None,
-                        aggressive=False,
-                        hex_len_cutoff=256) -> str:
+async def pb_sanitize_json(json_path: str,
+                           extra_drop_keys=None,
+                           aggressive: bool = False,
+                           hex_len_cutoff: int = 256) -> str:
 
     if not os.path.exists(json_path):
         raise FileNotFoundError(json_path)
@@ -170,20 +177,18 @@ async def sanitize_json(json_path: str,
         layers = pkt.get("_source", {}).get("layers", {})
         _sanitize_layers(layers, drops, aggressive, hex_len_cutoff)
 
-    # 🔥 Timestamped output to match what Gemini expects
+    # time-stamped file name so Gemini never reuses stale ones
     ts = int(asyncio.get_event_loop().time())
     out = json_path.replace(".json", f".sanitized.{ts}.json")
 
     open(out, "w").write(json.dumps(raw, indent=2))
     return out
 
-
 # ============================================================
-# 3️⃣ JSON → TOON (THIS FIXES YOUR ERROR)
+# 3️⃣ PacketBuddy: JSON → TOON
 # ============================================================
 @mcp.tool
-async def convert_json_to_toon(json_path: str) -> dict:
-    """Convert sanitized JSON → TOON."""
+async def pb_convert_json_to_toon(json_path: str) -> dict:
     if not os.path.exists(json_path):
         raise FileNotFoundError(json_path)
 
@@ -196,32 +201,32 @@ async def convert_json_to_toon(json_path: str) -> dict:
     return {"toon_path": toon_path, "stats": stats}
 
 # ============================================================
-# 4️⃣ ANALYZE TOON (INLINE CONTEXT)
+# 4️⃣ PacketBuddy: ANALYZE TOON
 # ============================================================
 @mcp.tool
-async def analyze_toon(toon_path: str, question: str) -> dict:
+async def pb_analyze_toon(toon_path: str, question: str) -> dict:
     if not os.path.exists(toon_path):
         raise FileNotFoundError(toon_path)
 
     toon_text = open(toon_path).read()
 
     contents = [
-        f"User question:\n{question}\n",
+        f"User question:\n{question}",
         "=== PCAP (TOON FORMAT) ===",
-        toon_text
+        toon_text,
     ]
 
     resp = await asyncio.get_event_loop().run_in_executor(
         None,
         lambda: client.models.generate_content(
             model="gemini-2.5-flash",
-            contents=contents
-        )
+            contents=contents,
+        ),
     )
 
     return {
         "answer": resp.text,
-        "debug": f"TOON length: {len(toon_text)} chars"
+        "debug": f"TOON chars: {len(toon_text)}",
     }
 
 # ============================================================
