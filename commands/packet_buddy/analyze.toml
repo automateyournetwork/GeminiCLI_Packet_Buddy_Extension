@@ -1,17 +1,13 @@
 name = "/packetcopilot:analyze"
-description = "Convert, sanitize, upload, and analyze a PCAP using Gemini File Search."
+description = "End-to-end deterministic PCAP analysis using Gemini File Search."
 args = ["question", "path?=./capture.pcap"]
 prompt = """
-echo "📤 Converting $path → JSON …"
-BASE64=$(base64 -w 0 "$path")
-JSON_PATH=$(mcp call convert_to_json --arguments "{\\"filename\\": \\"$(basename "$path)\\", \\"data_b64\\": \\"$BASE64\\"}" | jq -r '.')
 
-echo "🧼 Sanitizing JSON …"
-SANITIZED=$(mcp call sanitize_json --arguments "{\\"json_path\\": \\"$JSON_PATH\\", \\"aggressive\\": true}" | jq -r '.')
+1 - Start a new session and get the session ID and use that session ID throughout
+2 - Convert the PCAP JSON using Packet Buddy API
+4 - Santize the JSON to remove the drop fields
+5 - Convert sanatized JSON to TOON
+6 - Use TOON and NOT JSON (send TOON to LLM not JSON)
+7 - Answer the users original prompt
 
-echo "📚 Uploading to Gemini File Search …"
-STORE_NAME=$(mcp call upload_and_index --arguments "{\\"json_path\\": \\"$SANITIZED\\"}" | jq -r '.')
-
-echo "🤖 Asking Gemini …"
-mcp call analyze_pcap --arguments "{\\"store_name\\": \\"$STORE_NAME\\", \\"question\\": \\"$question\\"}"
 """
